@@ -1,0 +1,105 @@
+require('dotenv').config();
+const express = require('express');
+const mysql = require('mysql2/promise');
+const cors = require('cors');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const dbConfig = {
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASS || '',
+  database: process.env.DB_NAME || 'hospital_db',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+};
+
+let pool;
+(async function initPool(){
+  try {
+    pool = mysql.createPool(dbConfig);
+    // test connection
+    await pool.query('SELECT 1');
+    console.log('DB pool initialized');
+  } catch (err) {
+    console.error('Failed to create DB pool', err);
+    process.exit(1);
+  }
+})();
+
+// === Patients endpoints ===
+
+app.get('/api/patients', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM Patient ORDER BY Patient_ID DESC');
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.get('/api/patients/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const [rows] = await pool.query('SELECT * FROM Patient WHERE Patient_ID = ?', [id]);
+    if (!rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.post('/api/patients', async (req, res) => {
+  const { Name, Age, Gender, Contact, Address } = req.body;
+  if (!Name) return res.status(400).json({ error: 'Name required' });
+  try {
+    const [result] = await pool.query(
+      'INSERT INTO Patient (Name, Age, Gender, Contact, Address) VALUES (?, ?, ?, ?, ?)',
+      [Name, Age || null, Gender || null, Contact || null, Address || null]
+    );
+    const newId = result.insertId;
+    const [rows] = await pool.query('SELECT * FROM Patient WHERE Patient_ID = ?', [newId]);
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.put('/api/patients/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { Name, Age, Gender, Contact, Address } = req.body;
+  try {
+    await pool.query(
+      `UPDATE Patient SET Name = ?, Age = ?, Gender = ?, Contact = ?, Address = ? WHERE Patient_ID = ?`,
+      [Name, Age || null, Gender || null, Contact || null, Address || null, id]
+    );
+    const [rows] = await pool.query('SELECT * FROM Patient WHERE Patient_ID = ?', [id]);
+    res.json(rows[0] || {});
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.delete('/api/patients/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    await pool.query('DELETE FROM Patient WHERE Patient_ID = ?', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+// Health
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`API running on http://localhost:${port}`));
